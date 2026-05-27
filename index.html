@@ -566,40 +566,44 @@
 
     async function startScanner() {
       try {
-        if (!codeReader) {
-          codeReader = new ZXing.BrowserMultiFormatReader();
-        }
+        // Always create a fresh reader to avoid stale stream state
+        codeReader = new ZXing.BrowserMultiFormatReader();
 
         scannerContainer.classList.remove('hidden');
         scanning = true;
         scanBtnText.textContent = 'Stop Scanner';
         btnToggleScan.classList.add('ring-2', 'ring-danger/50');
 
-        // Get available video devices and pick the rear camera
-        const devices = await codeReader.listVideoInputDevices();
-        let selectedId = devices.length > 0 ? devices[0].deviceId : undefined;
-        // Prefer rear / back / environment camera
-        for (const d of devices) {
-          if (/back|rear|environment/i.test(d.label)) {
-            selectedId = d.deviceId;
-            break;
+        // Use facingMode: environment to directly request the rear camera.
+        // Listing devices by label doesn't work before permission is granted
+        // (browsers return empty labels for privacy), so the old label-matching
+        // approach would always silently fall back to the wrong camera.
+        await codeReader.decodeFromConstraints(
+          { video: { facingMode: { ideal: 'environment' } } },
+          'videoPreview',
+          (result, err) => {
+            if (result) {
+              const code = result.getText();
+              // Simulated beep via AudioContext
+              playBeep();
+              barcodeInput.value = code;
+              stopScanner();
+              activateProduct(code);
+              showToast(`Scanned: ${code}`, 'success');
+            }
+            // Ignore NotFoundException — it fires on every frame without a barcode
           }
-        }
-
-        codeReader.decodeFromVideoDevice(selectedId, 'videoPreview', (result, err) => {
-          if (result) {
-            const code = result.getText();
-            // Simulated beep via AudioContext
-            playBeep();
-            barcodeInput.value = code;
-            stopScanner();
-            activateProduct(code);
-            showToast(`Scanned: ${code}`, 'success');
-          }
-          // Ignore NotFoundException — it fires on every frame without a barcode
-        });
+        );
       } catch (err) {
-        showToast('Camera access denied or unavailable.', 'error');
+        let msg = 'Camera access denied or unavailable.';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          msg = '請在瀏覽器設定中允許相機權限，再重新嘗試。';
+        } else if (err.name === 'NotFoundError') {
+          msg = '找不到相機裝置。';
+        } else if (err.name === 'NotSupportedError' || err.name === 'SecurityError') {
+          msg = '請確認頁面使用 HTTPS 連線（相機功能需要安全連線）。';
+        }
+        showToast(msg, 'error');
         console.error('Scanner error:', err);
         stopScanner();
       }
@@ -608,6 +612,7 @@
     function stopScanner() {
       if (codeReader) {
         codeReader.reset();
+        codeReader = null;
       }
       scanning = false;
       scannerContainer.classList.add('hidden');
