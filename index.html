@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>價格記錄器 — Grocery Price Tracker</title>
+  <meta name="description" content="Personal grocery price tracker PWA for comparing prices across channels.">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <!-- ZXing Barcode Library -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+
+  <!-- Google Font: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style type="text/tailwindcss">
+    @theme {
+      --font-sans: 'Inter', sans-serif;
+      --color-surface: #1e293b;
+      --color-surface-alt: #334155;
+      --color-surface-hover: #475569;
+      --color-brand: #38bdf8;
+      --color-brand-dim: #0284c7;
+      --color-accent: #a78bfa;
+      --color-accent-dim: #7c3aed;
+      --color-success: #34d399;
+      --color-danger: #f87171;
+      --color-warning: #fbbf24;
+      --color-text: #f1f5f9;
+      --color-text-muted: #94a3b8;
+      --color-glass: rgba(30, 41, 59, 0.75);
+    }
+
+    /* Smooth scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--color-surface-alt); border-radius: 999px; }
+
+    /* Animations */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 8px rgba(56, 189, 248, 0.3); }
+      50% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.6); }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    @keyframes scanLine {
+      0% { top: 0; }
+      100% { top: 100%; }
+    }
+    .animate-fade-in {
+      animation: fadeSlideUp 0.4s ease-out both;
+    }
+    .animate-pulse-glow {
+      animation: pulseGlow 2s ease-in-out infinite;
+    }
+
+    /* Glassmorphism card */
+    .glass-card {
+      background: var(--color-glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    /* Scan line overlay */
+    .scan-line::after {
+      content: '';
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--color-brand), transparent);
+      animation: scanLine 2s ease-in-out infinite alternate;
+      box-shadow: 0 0 12px var(--color-brand);
+    }
+
+    /* Hide the ugly default file input */
+    input[type="file"]::file-selector-button {
+      display: none;
+    }
+
+    /* Prevent tap highlight on mobile */
+    * { -webkit-tap-highlight-color: transparent; }
+
+    /* Ensure 16px min font for inputs to avoid iOS zoom */
+    input, select, textarea { font-size: 16px !important; }
+  </style>
+</head>
+
+<body class="bg-slate-900 text-text font-sans min-h-dvh flex flex-col items-center">
+
+  <!-- ═══════════════════════════════════ APP SHELL ═══════════════════════════════════ -->
+  <div id="app" class="w-full max-w-[480px] min-h-dvh flex flex-col pb-24 relative">
+
+    <!-- ─── HEADER ─── -->
+    <header class="sticky top-0 z-50 glass-card px-4 py-3 flex items-center justify-between border-b border-slate-700/50">
+      <div class="flex items-center gap-2.5">
+        <!-- Cart icon -->
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-accent flex items-center justify-center shadow-lg shadow-brand/20">
+          <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.3 2.3c-.5.5-.1 1.3.6 1.3H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight leading-tight">價格記錄器</h1>
+          <p class="text-[11px] text-text-muted leading-tight">Price Tracker</p>
+        </div>
+      </div>
+      <!-- DB status badge -->
+      <div id="dbStatusBadge" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-700 text-text-muted transition-all duration-300">
+        No Database
+      </div>
+    </header>
+
+    <!-- ─── TOAST NOTIFICATION ─── -->
+    <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl glass-card shadow-2xl text-sm font-medium transition-all duration-300 opacity-0 -translate-y-4 pointer-events-none max-w-[420px] w-[90%] text-center">
+    </div>
+
+    <!-- ═══════════════════ SECTION 1: DATABASE ═══════════════════ -->
+    <section class="px-4 pt-4 animate-fade-in">
+      <div class="glass-card rounded-2xl p-4 space-y-3">
+        <div class="flex items-center gap-2 mb-1">
+          <svg class="w-4 h-4 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.2 3.6 4 8 4s8-1.8 8-4V7M4 7c0 2.2 3.6 4 8 4s8-1.8 8-4M4 7c0-2.2 3.6-4 8-4s8 1.8 8 4m0 5c0 2.2-3.6 4-8 4s-8-1.8-8-4"/></svg>
+          <span class="text-sm font-semibold text-text-muted uppercase tracking-wider">Database</span>
+        </div>
+
+        <!-- File Import -->
+        <label id="importLabel" for="fileImport" class="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-dashed border-slate-600 hover:border-brand/60 text-text-muted hover:text-brand transition-all duration-200 cursor-pointer active:scale-[0.98]">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12"/></svg>
+          <span class="text-sm font-medium">Import JSON Database</span>
+        </label>
+        <input type="file" id="fileImport" accept=".json" class="hidden" />
+      </div>
+    </section>
+
+    <!-- ═══════════════════ SECTION 2: BARCODE INPUT ═══════════════════ -->
+    <section class="px-4 pt-3 animate-fade-in" style="animation-delay: 0.05s;">
+      <div class="glass-card rounded-2xl p-4 space-y-3">
+        <div class="flex items-center gap-2 mb-1">
+          <svg class="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h0.01M12 12h4.01M16 20h4M4 12h4m12 0h0.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+          <span class="text-sm font-semibold text-text-muted uppercase tracking-wider">Barcode</span>
+        </div>
+
+        <!-- Camera Scanner Toggle -->
+        <button id="btnToggleScan" onclick="toggleScanner()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-dim to-accent-dim text-white font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-transform shadow-lg shadow-brand-dim/20">
+          <svg id="iconCamera" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span id="scanBtnText">Open Camera Scanner</span>
+        </button>
+
+        <!-- Video Container -->
+        <div id="scannerContainer" class="hidden rounded-xl overflow-hidden relative border border-slate-700/60">
+          <video id="videoPreview" class="w-full aspect-[4/3] object-cover bg-black"></video>
+          <!-- Scan overlay -->
+          <div class="scan-line absolute inset-0 pointer-events-none"></div>
+          <div class="absolute inset-0 pointer-events-none border-[3px] border-brand/30 rounded-xl"></div>
+          <!-- Corner brackets -->
+          <div class="absolute top-2 left-2 w-6 h-6 border-t-2 border-l-2 border-brand rounded-tl-md"></div>
+          <div class="absolute top-2 right-2 w-6 h-6 border-t-2 border-r-2 border-brand rounded-tr-md"></div>
+          <div class="absolute bottom-2 left-2 w-6 h-6 border-b-2 border-l-2 border-brand rounded-bl-md"></div>
+          <div class="absolute bottom-2 right-2 w-6 h-6 border-b-2 border-r-2 border-brand rounded-br-md"></div>
+        </div>
+
+        <!-- Manual Input -->
+        <div class="flex gap-2">
+          <input id="barcodeInput" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Enter barcode number…" class="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-text placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand/50 transition-all" />
+          <button onclick="lookupBarcode()" class="px-5 py-2.5 bg-brand hover:bg-brand/80 text-slate-900 font-semibold rounded-xl transition-colors active:scale-[0.96] shrink-0">
+            Search
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════ SECTION 3: PRODUCT DETAILS (hidden by default) ═══════════════════ -->
+    <section id="productSection" class="px-4 pt-3 hidden">
+      <div class="glass-card rounded-2xl p-4 space-y-4 animate-fade-in">
+
+        <!-- Product Header -->
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.5 0 1 .2 1.4.6l7 7a2 2 0 010 2.8l-5 5a2 2 0 01-2.8 0l-7-7A2 2 0 013 10V5a2 2 0 012-2z"/></svg>
+            <span class="text-sm font-semibold text-text-muted uppercase tracking-wider">Product</span>
+          </div>
+          <span id="productBadge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full"></span>
+        </div>
+
+        <!-- Barcode display -->
+        <div class="flex items-center gap-2 bg-slate-800/60 rounded-lg px-3 py-2">
+          <svg class="w-4 h-4 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.6.5-1.125 1.125-1.125h4.5c.6 0 1.125.5 1.125 1.125v4.5c0 .6-.5 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zm0 9.75c0-.6.5-1.125 1.125-1.125h4.5c.6 0 1.125.5 1.125 1.125v4.5c0 .6-.5 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zm9.75-9.75c0-.6.5-1.125 1.125-1.125h4.5c.6 0 1.125.5 1.125 1.125v4.5c0 .6-.5 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5z"/></svg>
+          <span id="currentBarcode" class="text-sm font-mono text-text-muted tracking-wider"></span>
+        </div>
+
+        <!-- Product Name -->
+        <div>
+          <label class="text-xs text-text-muted font-medium mb-1 block">Product Name</label>
+          <input id="productName" type="text" placeholder="Enter product name…" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-text placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand/50 transition-all" />
+        </div>
+
+        <!-- ── New Entry Form ── -->
+        <div class="bg-slate-800/40 rounded-xl p-3.5 space-y-3 border border-slate-700/40">
+          <span class="text-xs font-bold text-brand uppercase tracking-wider">Add New Price</span>
+          <div class="flex gap-2">
+            <div class="flex-1">
+              <label class="text-[11px] text-text-muted mb-0.5 block">Channel</label>
+              <select id="channelSelect" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-text focus:outline-none focus:ring-2 focus:ring-brand/50 appearance-none cursor-pointer">
+                <option value="全聯">全聯</option>
+                <option value="家樂福">家樂福</option>
+                <option value="好市多">好市多</option>
+                <option value="大潤發">大潤發</option>
+                <option value="7-11">7-11</option>
+                <option value="全家">全家</option>
+                <option value="蝦皮">蝦皮</option>
+              </select>
+            </div>
+            <div class="w-28">
+              <label class="text-[11px] text-text-muted mb-0.5 block">Price (NT$)</label>
+              <input id="priceInput" type="number" inputmode="decimal" min="0" step="1" placeholder="0" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-text focus:outline-none focus:ring-2 focus:ring-brand/50 transition-all" />
+            </div>
+          </div>
+          <button onclick="saveRecord()" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-success/90 to-emerald-500/80 text-slate-900 font-bold text-sm active:scale-[0.97] transition-transform shadow-lg shadow-success/20 flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Save to Memory
+          </button>
+        </div>
+
+        <!-- ── Price History Timeline ── -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <svg class="w-3.5 h-3.5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-xs font-bold text-text-muted uppercase tracking-wider">Price History</span>
+          </div>
+          <div id="historyList" class="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════ BOTTOM EXPORT BAR ═══════════════ -->
+    <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] z-50 p-3 glass-card border-t border-slate-700/50">
+      <button onclick="exportDatabase()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand to-accent text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-transform shadow-xl shadow-brand/25 animate-pulse-glow">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V4m0 8l-4-4m4 4l4-4"/></svg>
+        Export &amp; Download JSON
+      </button>
+    </div>
+
+  </div><!-- /app -->
+
+
+  <!-- ═══════════════════════════════════ JAVASCRIPT ═══════════════════════════════════ -->
+  <script>
+    // ─── State ───
+    let db = {};                  // In-memory database { barcode: { name, records[] } }
+    let activeBarcode = null;     // Currently viewed barcode
+    let codeReader = null;        // ZXing reader instance
+    let scanning = false;         // Scanner state
+
+    // ─── DOM References ───
+    const $ = (id) => document.getElementById(id);
+    const dbStatusBadge     = $('dbStatusBadge');
+    const fileImport        = $('fileImport');
+    const barcodeInput      = $('barcodeInput');
+    const productSection    = $('productSection');
+    const productBadge      = $('productBadge');
+    const currentBarcodeEl  = $('currentBarcode');
+    const productNameInput  = $('productName');
+    const channelSelect     = $('channelSelect');
+    const priceInput        = $('priceInput');
+    const historyList       = $('historyList');
+    const scannerContainer  = $('scannerContainer');
+    const videoPreview      = $('videoPreview');
+    const scanBtnText       = $('scanBtnText');
+    const btnToggleScan     = $('btnToggleScan');
+    const toastEl           = $('toast');
+
+    // ════════════════════════════════
+    //  TOAST NOTIFICATIONS
+    // ════════════════════════════════
+    let toastTimer = null;
+    function showToast(message, type = 'info') {
+      clearTimeout(toastTimer);
+      const colors = {
+        success: 'border-success/40 text-success',
+        error:   'border-danger/40 text-danger',
+        info:    'border-brand/40 text-brand',
+        warning: 'border-warning/40 text-warning'
+      };
+      toastEl.className = `fixed top-16 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl glass-card shadow-2xl text-sm font-medium transition-all duration-300 max-w-[420px] w-[90%] text-center border ${colors[type] || colors.info}`;
+      toastEl.textContent = message;
+      // Trigger animation
+      requestAnimationFrame(() => {
+        toastEl.style.opacity = '1';
+        toastEl.style.transform = 'translate(-50%, 0)';
+      });
+      toastTimer = setTimeout(() => {
+        toastEl.style.opacity = '0';
+        toastEl.style.transform = 'translate(-50%, -16px)';
+      }, 2800);
+    }
+
+    // ════════════════════════════════
+    //  DB STATUS BADGE UPDATE
+    // ════════════════════════════════
+    function updateDbStatus() {
+      const count = Object.keys(db).length;
+      if (count > 0) {
+        dbStatusBadge.textContent = `${count} item${count > 1 ? 's' : ''} loaded`;
+        dbStatusBadge.className = 'text-[11px] font-semibold px-2.5 py-1 rounded-full bg-success/15 text-success transition-all duration-300';
+      } else {
+        dbStatusBadge.textContent = 'Empty Database';
+        dbStatusBadge.className = 'text-[11px] font-semibold px-2.5 py-1 rounded-full bg-danger/15 text-danger transition-all duration-300';
+      }
+    }
+
+    // ════════════════════════════════
+    //  FILE IMPORT
+    // ════════════════════════════════
+    fileImport.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const parsed = JSON.parse(event.target.result);
+          if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Invalid format: expected a JSON object.');
+          }
+          db = parsed;
+          updateDbStatus();
+          showToast(`Loaded ${Object.keys(db).length} products`, 'success');
+          // Reset product view
+          productSection.classList.add('hidden');
+          activeBarcode = null;
+        } catch (err) {
+          showToast(`Import failed: ${err.message}`, 'error');
+          console.error('JSON parse error:', err);
+        }
+      };
+      reader.onerror = () => showToast('Failed to read file.', 'error');
+      reader.readAsText(file);
+      // Reset so the same file can be re-imported
+      fileImport.value = '';
+    });
+
+    // ════════════════════════════════
+    //  FILE EXPORT
+    // ════════════════════════════════
+    function exportDatabase() {
+      // Before exporting, sync the product name if we have an active barcode
+      syncProductName();
+
+      const jsonStr = JSON.stringify(db, null, 4);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'price_database.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Database exported!', 'success');
+    }
+
+    // ════════════════════════════════
+    //  BARCODE LOOKUP
+    // ════════════════════════════════
+    function lookupBarcode() {
+      const code = barcodeInput.value.trim();
+      if (!code) {
+        showToast('Please enter a barcode.', 'warning');
+        return;
+      }
+      activateProduct(code);
+    }
+
+    // Allow pressing Enter in the barcode input
+    barcodeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        lookupBarcode();
+      }
+    });
+
+    function activateProduct(barcode) {
+      // Save name of previous product if any
+      syncProductName();
+
+      activeBarcode = barcode;
+      currentBarcodeEl.textContent = barcode;
+
+      const product = db[barcode];
+      if (product) {
+        // Existing product
+        productNameInput.value = product.name || '';
+        productBadge.textContent = `${product.records?.length || 0} records`;
+        productBadge.className = 'text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-brand/15 text-brand';
+      } else {
+        // New product
+        productNameInput.value = '';
+        productBadge.textContent = 'New Product';
+        productBadge.className = 'text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-warning/15 text-warning';
+      }
+
+      // Reset form
+      priceInput.value = '';
+
+      // Render history
+      renderHistory();
+
+      // Show section
+      productSection.classList.remove('hidden');
+      // Re-trigger animation
+      productSection.querySelector('.glass-card').classList.remove('animate-fade-in');
+      void productSection.querySelector('.glass-card').offsetWidth; // force reflow
+      productSection.querySelector('.glass-card').classList.add('animate-fade-in');
+
+      // Scroll into view
+      productSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ════════════════════════════════
+    //  SYNC PRODUCT NAME (auto-save on blur or switch)
+    // ════════════════════════════════
+    function syncProductName() {
+      if (!activeBarcode) return;
+      const name = productNameInput.value.trim();
+      if (name && db[activeBarcode]) {
+        db[activeBarcode].name = name;
+      }
+    }
+    productNameInput.addEventListener('blur', syncProductName);
+
+    // ════════════════════════════════
+    //  SAVE A NEW PRICE RECORD
+    // ════════════════════════════════
+    function saveRecord() {
+      if (!activeBarcode) {
+        showToast('No barcode selected.', 'warning');
+        return;
+      }
+      const channel = channelSelect.value;
+      const price = parseFloat(priceInput.value);
+      if (isNaN(price) || price <= 0) {
+        showToast('Please enter a valid price.', 'warning');
+        return;
+      }
+      const name = productNameInput.value.trim();
+      if (!name) {
+        showToast('Please enter a product name.', 'warning');
+        productNameInput.focus();
+        return;
+      }
+
+      // Ensure product entry exists
+      if (!db[activeBarcode]) {
+        db[activeBarcode] = { name: name, records: [] };
+      }
+      db[activeBarcode].name = name;
+
+      // Create the record with today's date
+      const today = new Date();
+      const dateStr = today.getFullYear() + '-' +
+        String(today.getMonth() + 1).padStart(2, '0') + '-' +
+        String(today.getDate()).padStart(2, '0');
+
+      db[activeBarcode].records.push({
+        channel: channel,
+        price: price,
+        date: dateStr
+      });
+
+      // Update UI
+      updateDbStatus();
+      renderHistory();
+      priceInput.value = '';
+
+      // Update badge
+      const count = db[activeBarcode].records.length;
+      productBadge.textContent = `${count} record${count > 1 ? 's' : ''}`;
+      productBadge.className = 'text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-brand/15 text-brand';
+
+      showToast(`Saved: ${channel} — NT$${price}`, 'success');
+    }
+
+    // ════════════════════════════════
+    //  RENDER PRICE HISTORY
+    // ════════════════════════════════
+    function renderHistory() {
+      historyList.innerHTML = '';
+      const product = db[activeBarcode];
+      if (!product || !product.records || product.records.length === 0) {
+        historyList.innerHTML = `
+          <div class="text-center py-6 text-text-muted text-sm">
+            <svg class="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.6 0-1.125.5-1.125 1.125v17.25c0 .6.5 1.125 1.125 1.125h12.75c.6 0 1.125-.5 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+            No price records yet.
+          </div>`;
+        return;
+      }
+
+      // Sort records: newest first
+      const sorted = [...product.records].sort((a, b) => b.date.localeCompare(a.date));
+
+      // Calculate min/max for highlighting
+      const prices = sorted.map(r => r.price);
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+
+      sorted.forEach((rec, idx) => {
+        const isMin = rec.price === minPrice && prices.length > 1;
+        const isMax = rec.price === maxPrice && prices.length > 1;
+
+        // Channel color chips
+        const channelColors = {
+          '全聯':  'bg-emerald-500/15 text-emerald-400',
+          '家樂福': 'bg-blue-500/15 text-blue-400',
+          '好市多': 'bg-red-500/15 text-red-400',
+          '大潤發': 'bg-orange-500/15 text-orange-400',
+          '7-11':  'bg-teal-500/15 text-teal-400',
+          '全家':  'bg-cyan-500/15 text-cyan-400',
+          '蝦皮':  'bg-pink-500/15 text-pink-400',
+        };
+        const chipClass = channelColors[rec.channel] || 'bg-slate-600/30 text-slate-300';
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between py-2 px-3 rounded-lg bg-slate-800/40 hover:bg-slate-800/70 transition-colors';
+        row.style.animationDelay = `${idx * 0.04}s`;
+
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="text-[11px] font-medium ${chipClass} px-2 py-0.5 rounded-md whitespace-nowrap">${rec.channel}</span>
+            <span class="text-xs text-text-muted font-mono">${rec.date}</span>
+          </div>
+          <span class="text-sm font-bold tabular-nums ${isMin ? 'text-success' : isMax ? 'text-danger' : 'text-text'} shrink-0 ml-2">
+            ${isMin ? '▼ ' : isMax ? '▲ ' : ''}NT$${rec.price}
+          </span>`;
+
+        historyList.appendChild(row);
+      });
+    }
+
+    // ════════════════════════════════
+    //  BARCODE SCANNER (ZXing)
+    // ════════════════════════════════
+    function toggleScanner() {
+      if (scanning) {
+        stopScanner();
+      } else {
+        startScanner();
+      }
+    }
+
+    async function startScanner() {
+      try {
+        if (!codeReader) {
+          codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        scannerContainer.classList.remove('hidden');
+        scanning = true;
+        scanBtnText.textContent = 'Stop Scanner';
+        btnToggleScan.classList.add('ring-2', 'ring-danger/50');
+
+        // Get available video devices and pick the rear camera
+        const devices = await codeReader.listVideoInputDevices();
+        let selectedId = devices.length > 0 ? devices[0].deviceId : undefined;
+        // Prefer rear / back / environment camera
+        for (const d of devices) {
+          if (/back|rear|environment/i.test(d.label)) {
+            selectedId = d.deviceId;
+            break;
+          }
+        }
+
+        codeReader.decodeFromVideoDevice(selectedId, 'videoPreview', (result, err) => {
+          if (result) {
+            const code = result.getText();
+            // Simulated beep via AudioContext
+            playBeep();
+            barcodeInput.value = code;
+            stopScanner();
+            activateProduct(code);
+            showToast(`Scanned: ${code}`, 'success');
+          }
+          // Ignore NotFoundException — it fires on every frame without a barcode
+        });
+      } catch (err) {
+        showToast('Camera access denied or unavailable.', 'error');
+        console.error('Scanner error:', err);
+        stopScanner();
+      }
+    }
+
+    function stopScanner() {
+      if (codeReader) {
+        codeReader.reset();
+      }
+      scanning = false;
+      scannerContainer.classList.add('hidden');
+      scanBtnText.textContent = 'Open Camera Scanner';
+      btnToggleScan.classList.remove('ring-2', 'ring-danger/50');
+    }
+
+    // ════════════════════════════════
+    //  BEEP SOUND (synthesized)
+    // ════════════════════════════════
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = 1200;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      } catch (e) {
+        // Silently fail if AudioContext is not available
+      }
+    }
+
+    // ════════════════════════════════
+    //  INIT
+    // ════════════════════════════════
+    updateDbStatus();
+
+    // ════════════════════════════════
+    //  SERVICE WORKER STUB (for PWA add-to-homescreen)
+    // ════════════════════════════════
+    if ('serviceWorker' in navigator) {
+      // Register a minimal inline service worker via a Blob URL
+      const swCode = `
+        self.addEventListener('install', (e) => { self.skipWaiting(); });
+        self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
+        self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });
+      `;
+      const swBlob = new Blob([swCode], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl).catch(() => {
+        // Service worker registration may fail on some environments — that's OK
+      });
+    }
+  </script>
+
+</body>
+</html>
