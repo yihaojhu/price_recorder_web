@@ -99,16 +99,15 @@
           </svg>
           <span class="text-sm font-semibold text-text-muted uppercase tracking-wider">Database</span>
         </div>
-        <label for="fileImport"
-          class="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-dashed border-slate-600 hover:border-brand/60 text-text-muted hover:text-brand transition-all duration-200 cursor-pointer active:scale-[0.98]">
+        <button onclick="openFile()"
+          class="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-dashed border-slate-600 hover:border-brand/60 text-text-muted hover:text-brand transition-all duration-200 active:scale-[0.98]">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
           </svg>
-          <span class="text-sm font-medium">匯入 JSON 資料庫</span>
-        </label>
-        <input type="file" id="fileImport" accept=".json" class="hidden">
-        <!-- Save history (rendered by JS) -->
-        <div id="saveHistoryList"></div>
+          <span class="text-sm font-medium">開啟 JSON 資料庫</span>
+        </button>
+        <!-- Recent files (rendered by JS) -->
+        <div id="recentFilesList"></div>
       </div>
     </section>
 
@@ -302,22 +301,22 @@
       </div>
     </section>
 
-    <!-- ═══════════════ BOTTOM EXPORT BAR ═══════════════ -->
+    <!-- ═══════════════ BOTTOM SAVE BAR ═══════════════ -->
     <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] z-50 p-3 glass-card border-t border-slate-700/50">
       <div class="flex gap-2">
-        <button onclick="saveDatabase()"
-          class="flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-2xl bg-slate-700 border border-slate-600 text-text font-bold text-sm active:scale-[0.97] transition-transform shrink-0 hover:border-brand/50 hover:text-brand">
+        <button onclick="saveFile()"
+          class="flex-1 py-3.5 rounded-2xl bg-slate-700 border border-slate-600 text-text font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-transform hover:border-brand/50 hover:text-brand">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
           </svg>
           存檔
         </button>
-        <button onclick="exportDatabase()"
+        <button onclick="saveFileAs()"
           class="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-brand to-accent text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-transform shadow-xl shadow-brand/25 animate-pulse-glow">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V4m0 8l-4-4m4 4l4-4" />
           </svg>
-          匯出並下載 JSON
+          另存新檔
         </button>
       </div>
     </div>
@@ -337,7 +336,8 @@
       stores: ['全聯', '家樂福', '好市多', '大全聯', '蝦皮', 'Momo'],
       units:  ['g', 'L', '罐', '瓶', '個', '斤']
     };
-    let activeId        = null;
+    let activeId           = null;
+    let currentFileHandle  = null;
     let editingIndex    = null;
     let deletePendingIdx = null;
     let deletePendingTimer = null;
@@ -345,7 +345,6 @@
     // ─── DOM refs ───
     const $ = id => document.getElementById(id);
     const dbStatusBadge   = $('dbStatusBadge');
-    const fileImport      = $('fileImport');
     const productSection  = $('productSection');
     const productBadge    = $('productBadge');
     const productNameInput = $('productName');
@@ -383,7 +382,10 @@
     // ════════════════════════════════
     function updateDbStatus() {
       const count = Object.keys(db.products).length;
-      if (count > 0) {
+      if (currentFileHandle) {
+        dbStatusBadge.textContent = currentFileHandle.name.replace(/\.json$/i, '');
+        dbStatusBadge.className = 'text-[11px] font-semibold px-2.5 py-1 rounded-full bg-brand/15 text-brand transition-all duration-300 max-w-[150px] truncate';
+      } else if (count > 0) {
         dbStatusBadge.textContent = `${count} 種商品`;
         dbStatusBadge.className = 'text-[11px] font-semibold px-2.5 py-1 rounded-full bg-success/15 text-success transition-all duration-300';
       } else {
@@ -393,155 +395,190 @@
     }
 
     // ════════════════════════════════
-    //  IMPORT
+    //  INDEXEDDB HELPERS
     // ════════════════════════════════
-    fileImport.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const parsed = JSON.parse(ev.target.result);
-          if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('格式錯誤');
-          if (!parsed.products || typeof parsed.products !== 'object') {
-            throw new Error('不支援舊版格式，請使用新版資料庫');
-          }
-          db.products = parsed.products;
-          if (Array.isArray(parsed.stores) && parsed.stores.length > 0) db.stores = parsed.stores;
-          if (Array.isArray(parsed.units)  && parsed.units.length  > 0) db.units  = parsed.units;
-          activeId = null;
-          productSection.classList.add('hidden');
-          updateDbStatus();
-          renderProductGrid();
-          renderStoreSelect();
-          renderUnitSelect();
-          saveToHistory('匯入');
-          showToast(`已載入 ${Object.keys(db.products).length} 種商品`, 'success');
-        } catch (err) {
-          showToast(`匯入失敗：${err.message}`, 'error');
-        }
-      };
-      reader.onerror = () => showToast('讀取檔案失敗', 'error');
-      reader.readAsText(file);
-      fileImport.value = '';
-    });
-
-    // ════════════════════════════════
-    //  EXPORT
-    // ════════════════════════════════
-    function exportDatabase() {
-      syncProductName();
-      const json = JSON.stringify(db, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'price_database.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('資料庫已匯出', 'success');
-    }
-
-    // ════════════════════════════════
-    //  SAVE HISTORY (localStorage)
-    // ════════════════════════════════
-    const LS_KEY   = 'price_recorder_saves';
-    const MAX_SAVES = 5;
-
-    function loadHistory() {
-      try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        const valid = parsed.filter(e => {
-          try { return e.id && e.timestamp && e.data && typeof e.data.products === 'object'; }
-          catch { return false; }
-        });
-        if (valid.length !== parsed.length) {
-          localStorage.setItem(LS_KEY, JSON.stringify(valid));
-        }
-        return valid;
-      } catch { return []; }
-    }
-
-    function saveToHistory(label) {
-      const history = loadHistory();
-      const ts = Date.now();
-      history.unshift({
-        id: 'save_' + ts,
-        timestamp: ts,
-        label,
-        productCount: Object.keys(db.products).length,
-        data: JSON.parse(JSON.stringify(db))
+    let _idb = null;
+    function getIDB() {
+      if (_idb) return Promise.resolve(_idb);
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open('price_recorder_fs', 1);
+        req.onupgradeneeded = e => {
+          e.target.result.createObjectStore('recent_files', { keyPath: 'id' });
+        };
+        req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+        req.onerror   = () => reject(req.error);
       });
-      if (history.length > MAX_SAVES) history.splice(MAX_SAVES);
-      try {
-        localStorage.setItem(LS_KEY, JSON.stringify(history));
-        renderSaveHistory();
-        return true;
-      } catch { return false; }
+    }
+    async function idbGet(id) {
+      const d = await getIDB();
+      return new Promise((resolve, reject) => {
+        const req = d.transaction('recent_files', 'readonly').objectStore('recent_files').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
+      });
+    }
+    async function idbPut(entry) {
+      const d = await getIDB();
+      return new Promise((resolve, reject) => {
+        const req = d.transaction('recent_files', 'readwrite').objectStore('recent_files').put(entry);
+        req.onsuccess = () => resolve();
+        req.onerror   = () => reject(req.error);
+      });
+    }
+    async function idbDelete(id) {
+      const d = await getIDB();
+      return new Promise((resolve, reject) => {
+        const req = d.transaction('recent_files', 'readwrite').objectStore('recent_files').delete(id);
+        req.onsuccess = () => resolve();
+        req.onerror   = () => reject(req.error);
+      });
+    }
+    async function idbGetAll() {
+      const d = await getIDB();
+      return new Promise((resolve, reject) => {
+        const req = d.transaction('recent_files', 'readonly').objectStore('recent_files').getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
+      });
     }
 
-    function deleteFromHistory(id) {
-      const history = loadHistory().filter(e => e.id !== id);
-      localStorage.setItem(LS_KEY, JSON.stringify(history));
-      renderSaveHistory();
-    }
+    // ════════════════════════════════
+    //  FILE SYSTEM ACCESS API
+    // ════════════════════════════════
+    const FILE_PICKER_OPTS = {
+      types: [{ description: 'JSON 資料庫', accept: { 'application/json': ['.json'] } }],
+      excludeAcceptAllOption: true
+    };
 
-    function loadFromHistory(id) {
-      const history = loadHistory();
-      const entry = history.find(e => e.id === id);
-      if (!entry) {
-        deleteFromHistory(id);
-        showToast('此存檔已失效', 'error');
-        return;
-      }
-      db.products = entry.data.products || {};
-      if (Array.isArray(entry.data.stores) && entry.data.stores.length) db.stores = entry.data.stores;
-      if (Array.isArray(entry.data.units)  && entry.data.units.length)  db.units  = entry.data.units;
+    function applyParsedDb(parsed) {
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('格式錯誤');
+      if (!parsed.products || typeof parsed.products !== 'object') throw new Error('不支援此格式');
+      db.products = parsed.products;
+      if (Array.isArray(parsed.stores) && parsed.stores.length) db.stores = parsed.stores;
+      if (Array.isArray(parsed.units)  && parsed.units.length)  db.units  = parsed.units;
       activeId = null;
       productSection.classList.add('hidden');
       updateDbStatus();
       renderProductGrid();
       renderStoreSelect();
       renderUnitSelect();
-      showToast(`已載入：${Object.keys(db.products).length} 種商品`, 'success');
     }
 
-    function saveDatabase() {
-      syncProductName();
-      if (saveToHistory('手動存檔')) {
-        showToast('已存檔', 'success');
-      } else {
-        showToast('存檔失敗：空間不足，請先刪除舊的存檔', 'error');
+    async function verifyPermission(handle, readWrite = false) {
+      const opts = { mode: readWrite ? 'readwrite' : 'read' };
+      if ((await handle.queryPermission(opts)) === 'granted') return true;
+      return (await handle.requestPermission(opts)) === 'granted';
+    }
+
+    async function openFile() {
+      if (!window.showOpenFilePicker) {
+        showToast('請使用 Chrome 瀏覽器以使用此功能', 'warning'); return;
+      }
+      try {
+        const [handle] = await window.showOpenFilePicker(FILE_PICKER_OPTS);
+        const text = await (await handle.getFile()).text();
+        applyParsedDb(JSON.parse(text));
+        currentFileHandle = handle;
+        await idbPut({ id: handle.name, name: handle.name, handle, lastOpened: Date.now() });
+        await renderRecentFiles();
+        showToast(`已開啟：${Object.keys(db.products).length} 種商品`, 'success');
+      } catch(e) {
+        if (e.name !== 'AbortError') showToast(`開啟失敗：${e.message}`, 'error');
       }
     }
 
-    function renderSaveHistory() {
-      const list = $('saveHistoryList');
+    async function saveFile() {
+      if (!currentFileHandle) { await saveFileAs(); return; }
+      try {
+        if (!(await verifyPermission(currentFileHandle, true))) {
+          showToast('無法存取檔案，請重新開啟', 'error'); return;
+        }
+        syncProductName();
+        const writable = await currentFileHandle.createWritable();
+        await writable.write(JSON.stringify(db, null, 2));
+        await writable.close();
+        showToast(`已存檔：${currentFileHandle.name}`, 'success');
+      } catch(e) {
+        if (e.name !== 'AbortError') showToast(`存檔失敗：${e.message}`, 'error');
+      }
+    }
+
+    async function saveFileAs() {
+      if (!window.showSaveFilePicker) {
+        showToast('請使用 Chrome 瀏覽器以使用此功能', 'warning'); return;
+      }
+      try {
+        const handle = await window.showSaveFilePicker({
+          ...FILE_PICKER_OPTS,
+          suggestedName: currentFileHandle ? currentFileHandle.name : 'price_database.json'
+        });
+        syncProductName();
+        const writable = await handle.createWritable();
+        await writable.write(JSON.stringify(db, null, 2));
+        await writable.close();
+        currentFileHandle = handle;
+        await idbPut({ id: handle.name, name: handle.name, handle, lastOpened: Date.now() });
+        await renderRecentFiles();
+        updateDbStatus();
+        showToast(`已另存新檔：${handle.name}`, 'success');
+      } catch(e) {
+        if (e.name !== 'AbortError') showToast(`另存失敗：${e.message}`, 'error');
+      }
+    }
+
+    async function openRecentFile(id) {
+      try {
+        const entry = await idbGet(id);
+        if (!entry) { await removeRecentFile(id); showToast('找不到此記錄', 'error'); return; }
+        if (!(await verifyPermission(entry.handle, true))) {
+          showToast('未取得檔案存取權限', 'warning'); return;
+        }
+        let text;
+        try {
+          text = await (await entry.handle.getFile()).text();
+        } catch(e) {
+          await removeRecentFile(id);
+          showToast('檔案已不存在，已移除記錄', 'error'); return;
+        }
+        applyParsedDb(JSON.parse(text));
+        currentFileHandle = entry.handle;
+        await idbPut({ ...entry, lastOpened: Date.now() });
+        await renderRecentFiles();
+        showToast(`已開啟：${Object.keys(db.products).length} 種商品`, 'success');
+      } catch(e) {
+        if (e.name !== 'AbortError') showToast(`開啟失敗：${e.message}`, 'error');
+      }
+    }
+
+    async function removeRecentFile(id) {
+      await idbDelete(id);
+      await renderRecentFiles();
+    }
+
+    async function renderRecentFiles() {
+      const list = $('recentFilesList');
       if (!list) return;
-      const history = loadHistory();
-      if (!history.length) { list.innerHTML = ''; return; }
-      const rows = history.map(e => {
-        const d = new Date(e.timestamp);
-        const dateStr = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} `
+      let entries = [];
+      try { entries = await idbGetAll(); } catch { entries = []; }
+      entries.sort((a, b) => b.lastOpened - a.lastOpened);
+      if (!entries.length) { list.innerHTML = ''; return; }
+      const rows = entries.map(e => {
+        const d = new Date(e.lastOpened);
+        const ts = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} `
           + `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-        const labelColor = e.label === '匯入' ? 'text-accent' : 'text-brand';
+        const isCurrent = currentFileHandle && currentFileHandle.name === e.name;
         return `
-          <div class="flex items-center gap-2 py-2 px-3 rounded-lg bg-slate-800/50 hover:bg-slate-800/80 transition-colors">
+          <div class="flex items-center gap-2 py-2 px-3 rounded-lg ${isCurrent ? 'bg-brand/10 border border-brand/20' : 'bg-slate-800/50 hover:bg-slate-800/80'} transition-colors">
+            <svg class="w-4 h-4 ${isCurrent ? 'text-brand' : 'text-text-muted'} shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1.5">
-                <span class="text-[11px] font-bold ${labelColor}">${e.label}</span>
-                <span class="text-[11px] text-text-muted">${e.productCount} 種商品</span>
-              </div>
-              <div class="text-[10px] text-slate-500 font-mono">${dateStr}</div>
+              <div class="text-xs font-medium text-text truncate">${e.name}</div>
+              <div class="text-[10px] text-slate-500 font-mono">${ts}</div>
             </div>
-            <button onclick="loadFromHistory('${e.id}')"
-              class="px-2.5 py-1 rounded-md bg-brand/15 text-brand text-[11px] font-semibold hover:bg-brand/25 active:scale-95 transition-all shrink-0">載入</button>
-            <button onclick="deleteFromHistory('${e.id}')"
+            <button onclick="openRecentFile('${e.id}')"
+              class="px-2.5 py-1 rounded-md bg-brand/15 text-brand text-[11px] font-semibold hover:bg-brand/25 active:scale-95 transition-all shrink-0">開啟</button>
+            <button onclick="removeRecentFile('${e.id}')"
               class="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-danger hover:bg-danger/10 transition-colors active:scale-95 shrink-0">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -551,7 +588,7 @@
       }).join('');
       list.innerHTML = `
         <div class="pt-3 border-t border-slate-700/50 mt-1">
-          <span class="text-[11px] text-text-muted font-semibold uppercase tracking-wider">存檔紀錄</span>
+          <span class="text-[11px] text-text-muted font-semibold uppercase tracking-wider">最近開啟的檔案</span>
           <div class="mt-2 space-y-1.5">${rows}</div>
         </div>`;
     }
@@ -1040,7 +1077,7 @@
     renderProductGrid();
     renderStoreSelect();
     renderUnitSelect();
-    renderSaveHistory();
+    renderRecentFiles();
 
     // ════════════════════════════════
     //  SERVICE WORKER (PWA homescreen)
